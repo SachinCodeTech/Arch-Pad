@@ -61,6 +61,19 @@ export default function App() {
   const startPoints = useRef({ x: 0, y: 0 });
   const previewData = useRef<ImageData | null>(null);
 
+  // High performance CAD drawing and coordinates smoothing refs
+  const strokePoints = useRef<{ x: number; y: number }[]>([]);
+  const pointerDownTime = useRef<number>(0);
+  const pointerDownPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const livePointerPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // CAD Point-to-point drawing state variables
+  const [p2pAnchor, setP2pAnchor] = useState<{ x: number; y: number } | null>(null);
+  const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
+
+  // Shift orthographic angle snap variable
+  const isShiftPressed = useRef<boolean>(false);
+
   // Active Modals
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [storageUsedInfo, setStorageUsedInfo] = useState<string>('~10 KB');
@@ -99,6 +112,42 @@ export default function App() {
     window.addEventListener('beforeinstallprompt', handleBeforePrompt);
     return () => window.removeEventListener('beforeinstallprompt', handleBeforePrompt);
   }, []);
+
+  // Listen for keyboard drawing constraints (Shift to snap 45 degrees, Escape to cancel point-to-point)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') {
+        isShiftPressed.current = true;
+        if (p2pAnchor || isDrawing) redrawVisibleCanvas();
+      }
+      if (e.key === 'Escape') {
+        setP2pAnchor(null);
+        setHoverPos(null);
+        redrawVisibleCanvas();
+        showToast('CAD Point-to-Point drawing cancelled.');
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') {
+        isShiftPressed.current = false;
+        if (p2pAnchor || isDrawing) redrawVisibleCanvas();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [p2pAnchor, isDrawing]);
+
+  // Reset CAD Point-to-Point if selected tool changes
+  useEffect(() => {
+    setP2pAnchor(null);
+    setHoverPos(null);
+    strokePoints.current = [];
+    if (appReady) redrawVisibleCanvas();
+  }, [currentTool, appReady]);
 
   // No external cloud auth needed
 
@@ -211,6 +260,15 @@ export default function App() {
     }
   };
 
+  const getScaleMultiplier = () => {
+    const match = currentScale.match(/1:(\d+)/);
+    if (match) {
+      const ratio = parseInt(match[1]);
+      return ratio / 100;
+    }
+    return 1.0;
+  };
+
   const redrawVisibleCanvas = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -245,6 +303,107 @@ export default function App() {
 
       // Draw client artwork
       ctx.drawImage(offscreenCanvasRef.current, 0, 0);
+
+      // --- ADVANCED DYNAMIC CAD BLUEPRINT LAYER ---
+      let drawPreview = false;
+      let sx = 0, sy = 0, ex = 0, ey = 0;
+
+      if (p2pAnchor) {
+        drawPreview = true;
+        sx = p2pAnchor.x;
+        sy = p2pAnchor.y;
+        ex = hoverPos ? hoverPos.x : sx;
+        ey = hoverPos ? hoverPos.y : sy;
+      } else if (isDrawing && currentTool !== 'pen' && currentTool !== 'eraser' && currentTool !== 'pan') {
+        drawPreview = true;
+        sx = startPoints.current.x;
+        sy = startPoints.current.y;
+        ex = livePointerPos.current.x;
+        ey = livePointerPos.current.y;
+      }
+
+      if (drawPreview) {
+        if (isShiftPressed.current) {
+          const dx = ex - sx;
+          const dy = ey - sy;
+          const angle = Math.atan2(dy, dx);
+          const snappedAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          ex = sx + distance * Math.cos(snappedAngle);
+          ey = sy + distance * Math.sin(snappedAngle);
+        }
+
+        ctx.save();
+        // 1. Live floating blueprint path vector preview
+        ctx.strokeStyle = '#4f8ef7';
+        ctx.lineWidth = pencilSize;
+        ctx.setLineDash([4 / zoom, 4 / zoom]); // Scale invariant screen dashes
+        ctx.shadowColor = 'rgba(79, 142, 247, 0.4)';
+        ctx.shadowBlur = 8 / zoom;
+
+        drawVectorShape(ctx, currentTool, sx, sy, ex, ey, pencilSize, '#4f8ef7');
+        ctx.restore();
+
+        ctx.save();
+        // 2. Blueprint alignment CAD helpers
+        ctx.strokeStyle = '#4f8ef7';
+        ctx.lineWidth = 1 / zoom;
+        ctx.setLineDash([3 / zoom, 3 / zoom]);
+
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
+
+        // Crosshairs at starting point
+        const cs = 10 / zoom;
+        ctx.beginPath();
+        ctx.moveTo(sx - cs, sy); ctx.lineTo(sx + cs, sy);
+        ctx.moveTo(sx, sy - cs); ctx.lineTo(sx, sy + cs);
+        ctx.stroke();
+
+        // Crosshairs at endpoint
+        ctx.beginPath();
+        ctx.moveTo(ex - cs, ey); ctx.lineTo(ex + cs, ey);
+        ctx.moveTo(ex, ey - cs); ctx.lineTo(ex, ey + cs);
+        ctx.stroke();
+
+        // 3. Proportional physical scale text tags
+        const dx = ex - sx;
+        const dy = ey - sy;
+        const distPx = Math.sqrt(dx * dx + dy * dy);
+        const angleRad = Math.atan2(dy, dx);
+        let angleDeg = Math.round(angleRad * 180 / Math.PI);
+        if (angleDeg < 0) angleDeg += 360;
+
+        const mult = getScaleMultiplier();
+        const distReal = distPx * mult;
+        const label = `${distReal.toFixed(2)}m (${angleDeg}°)`;
+
+        ctx.font = `bold ${Math.max(10, 11 / zoom)}px 'JetBrains Mono', monospace`;
+        const tw = ctx.measureText(label).width;
+
+        const padX = 6 / zoom;
+        const padY = 4 / zoom;
+        const bw = tw + padX * 2;
+        const bh = (12 / zoom) + padY * 2;
+
+        const mx = (sx + ex) / 2;
+        const my = (sy + ey) / 2;
+
+        ctx.fillStyle = 'rgba(10, 10, 15, 0.9)';
+        ctx.fillRect(mx - bw / 2, my - 24 / zoom, bw, bh);
+
+        ctx.strokeStyle = 'rgba(79, 142, 247, 0.5)';
+        ctx.lineWidth = 1 / zoom;
+        ctx.setLineDash([]);
+        ctx.strokeRect(mx - bw / 2, my - 24 / zoom, bw, bh);
+
+        ctx.fillStyle = '#4f8ef7';
+        ctx.fillText(label, mx - tw / 2, my - 15 / zoom);
+
+        ctx.restore();
+      }
     }
     ctx.restore();
   };
@@ -518,6 +677,44 @@ export default function App() {
       return;
     }
 
+    // --- SECOND-POINT CAD CLICK FINALIZATION TRIGGER ---
+    if (p2pAnchor) {
+      let endX = x;
+      let endY = y;
+      
+      if (isShiftPressed.current) {
+        const dx = endX - p2pAnchor.x;
+        const dy = endY - p2pAnchor.y;
+        const angle = Math.atan2(dy, dx);
+        const snappedAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        endX = p2pAnchor.x + distance * Math.cos(snappedAngle);
+        endY = p2pAnchor.y + distance * Math.sin(snappedAngle);
+      }
+
+      initOffscreenCanvas();
+      const oCanvas = offscreenCanvasRef.current;
+      if (oCanvas) {
+        const oCtx = oCanvas.getContext('2d');
+        if (oCtx) {
+          takeSnapSnapshot();
+          drawVectorShape(oCtx, currentTool, p2pAnchor.x, p2pAnchor.y, endX, endY);
+          
+          setP2pAnchor(null);
+          setHoverPos(null);
+          setIsDrawing(false);
+          redrawVisibleCanvas();
+          triggerQuickAutoSaveDelay();
+        }
+      }
+      return;
+    }
+
+    // Capture click parameters for potential Point-to-Point fallback detection
+    pointerDownTime.current = Date.now();
+    pointerDownPos.current = { x, y };
+    livePointerPos.current = { x, y };
+
     setIsDrawing(true);
     startPoints.current = { x, y };
 
@@ -529,6 +726,8 @@ export default function App() {
 
     if (currentTool === 'pen' || currentTool === 'eraser') {
       takeSnapSnapshot();
+      strokePoints.current = [{ x, y }];
+
       oCtx.beginPath();
       oCtx.arc(
         x,
@@ -591,8 +790,16 @@ export default function App() {
       return;
     }
 
-    if (!isDrawing) return;
     const { x, y } = getPointerPos(e);
+    livePointerPos.current = { x, y };
+
+    if (p2pAnchor) {
+      setHoverPos({ x, y });
+      redrawVisibleCanvas();
+      return;
+    }
+
+    if (!isDrawing) return;
     
     initOffscreenCanvas();
     const oCanvas = offscreenCanvasRef.current;
@@ -600,47 +807,42 @@ export default function App() {
     const oCtx = oCanvas.getContext('2d');
     if (!oCtx) return;
 
-    if (currentTool === 'pen') {
-      oCtx.beginPath();
-      oCtx.moveTo(startPoints.current.x, startPoints.current.y);
-      oCtx.lineTo(x, y);
-      oCtx.lineWidth = pencilSize;
-      oCtx.lineCap = 'round';
-      oCtx.lineJoin = 'round';
-      oCtx.strokeStyle = pencilColor;
-      oCtx.stroke();
-      startPoints.current = { x, y };
+    if (currentTool === 'pen' || currentTool === 'eraser') {
+      const pts = strokePoints.current;
+      pts.push({ x, y });
 
-      redrawVisibleCanvas();
-    } else if (currentTool === 'eraser') {
-      oCtx.beginPath();
-      oCtx.moveTo(startPoints.current.x, startPoints.current.y);
-      oCtx.lineTo(x, y);
-      oCtx.lineWidth = pencilSize * 3;
-      oCtx.lineCap = 'round';
-      oCtx.lineJoin = 'round';
-      
-      const bgHex = theme === 'light' ? '#ffffff' : '#fafaf8';
-      oCtx.strokeStyle = bgHex;
-      oCtx.stroke();
-      startPoints.current = { x, y };
+      if (pts.length > 2) {
+        const prevMidX = (pts[pts.length - 3].x + pts[pts.length - 2].x) / 2;
+        const prevMidY = (pts[pts.length - 3].y + pts[pts.length - 2].y) / 2;
+        const currMidX = (pts[pts.length - 2].x + pts[pts.length - 1].x) / 2;
+        const currMidY = (pts[pts.length - 2].y + pts[pts.length - 1].y) / 2;
 
-      redrawVisibleCanvas();
-    } else if (previewData.current) {
-      // Direct shapes preview: clear and draw base offscreen drawing, then active shape outline
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          redrawVisibleCanvas();
-          // Draw previewing shape in screen coordinate space
-          const screenStartX = startPoints.current.x * zoom + panOffset.x;
-          const screenStartY = startPoints.current.y * zoom + panOffset.y;
-          const screenEndX = x * zoom + panOffset.x;
-          const screenEndY = y * zoom + panOffset.y;
-          drawVectorShape(ctx, currentTool, screenStartX, screenStartY, screenEndX, screenEndY, pencilSize * zoom);
-        }
+        oCtx.beginPath();
+        oCtx.moveTo(prevMidX, prevMidY);
+        oCtx.quadraticCurveTo(pts[pts.length - 2].x, pts[pts.length - 2].y, currMidX, currMidY);
+        oCtx.lineWidth = currentTool === 'eraser' ? pencilSize * 3 : pencilSize;
+        oCtx.lineCap = 'round';
+        oCtx.lineJoin = 'round';
+        const bgHex = theme === 'light' ? '#ffffff' : '#fafaf8';
+        oCtx.strokeStyle = currentTool === 'eraser' ? bgHex : pencilColor;
+        oCtx.stroke();
+      } else if (pts.length === 2) {
+        oCtx.beginPath();
+        oCtx.moveTo(pts[0].x, pts[0].y);
+        oCtx.lineTo(pts[1].x, pts[1].y);
+        oCtx.lineWidth = currentTool === 'eraser' ? pencilSize * 3 : pencilSize;
+        oCtx.lineCap = 'round';
+        oCtx.lineJoin = 'round';
+        const bgHex = theme === 'light' ? '#ffffff' : '#fafaf8';
+        oCtx.strokeStyle = currentTool === 'eraser' ? bgHex : pencilColor;
+        oCtx.stroke();
       }
+      
+      startPoints.current = { x, y };
+      redrawVisibleCanvas();
+    } else {
+      // Direct shapes preview handled by scale-invariant dynamic blueprint layer in redrawVisibleCanvas
+      redrawVisibleCanvas();
     }
   };
 
@@ -664,7 +866,16 @@ export default function App() {
     }
 
     if (!isDrawing) return;
-    setIsDrawing(false);
+
+    const { x, y } = getPointerPos(e);
+    
+    // Check if quick tap indicates Point-to-Point mode initiation
+    const duration = Date.now() - pointerDownTime.current;
+    const dx = x - pointerDownPos.current.x;
+    const dy = y - pointerDownPos.current.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    const isShapeTool = ['line', 'rect', 'circle', 'arrow'].includes(currentTool);
 
     initOffscreenCanvas();
     const oCanvas = offscreenCanvasRef.current;
@@ -672,16 +883,45 @@ export default function App() {
     const oCtx = oCanvas.getContext('2d');
     if (!oCtx) return;
 
+    if (isShapeTool && duration < 320 && dist < 6) {
+      // Click-Click point to point CAD mode initiated!
+      setIsDrawing(false);
+      setP2pAnchor({ x: pointerDownPos.current.x, y: pointerDownPos.current.y });
+      setHoverPos({ x: pointerDownPos.current.x, y: pointerDownPos.current.y });
+      strokePoints.current = [];
+      previewData.current = null;
+      redrawVisibleCanvas();
+      showToast('CAD Point-to-Point mode: Click second point. [SHIFT] snaps angle.', 'info');
+      return;
+    }
+
+    setIsDrawing(false);
+
     if (currentTool !== 'pen' && currentTool !== 'eraser') {
-      const { x, y } = getPointerPos(e);
       if (previewData.current) {
         // Create rollback snapshot BEFORE shape is burned
         takeSnapSnapshot();
+        
+        let endX = x;
+        let endY = y;
+        if (isShiftPressed.current) {
+          const sdx = endX - startPoints.current.x;
+          const sdy = endY - startPoints.current.y;
+          const angle = Math.atan2(sdy, sdx);
+          const snappedAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+          const distance = Math.sqrt(sdx * sdx + sdy * sdy);
+          endX = startPoints.current.x + distance * Math.cos(snappedAngle);
+          endY = startPoints.current.y + distance * Math.sin(snappedAngle);
+        }
+
         // Permanently draw shape in world coordinate space
-        drawVectorShape(oCtx, currentTool, startPoints.current.x, startPoints.current.y, x, y);
+        drawVectorShape(oCtx, currentTool, startPoints.current.x, startPoints.current.y, endX, endY);
         previewData.current = null;
         redrawVisibleCanvas();
       }
+    } else {
+      // Freehand drawing completed
+      strokePoints.current = [];
     }
     triggerQuickAutoSaveDelay();
   };
@@ -693,9 +933,10 @@ export default function App() {
     sy: number,
     ex: number,
     ey: number,
-    customWidth?: number
+    customWidth?: number,
+    customColor?: string
   ) => {
-    ctx.strokeStyle = pencilColor;
+    ctx.strokeStyle = customColor !== undefined ? customColor : pencilColor;
     ctx.lineWidth = customWidth !== undefined ? customWidth : pencilSize;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
