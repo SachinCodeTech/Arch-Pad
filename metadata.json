@@ -1,0 +1,8 @@
+{
+  "name": "Arch Pad v1.01",
+  "description": "Professional Architectural CAD Sketchbook with stable offline capabilities, standalone PWA layouts, and Google Database synchronization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
