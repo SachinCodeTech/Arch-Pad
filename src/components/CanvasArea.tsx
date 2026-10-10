@@ -249,7 +249,7 @@ export default function CanvasArea({
         <canvas
           id="sketchCanvas"
           ref={canvasRef}
-          className="absolute top-0 left-0 w-full h-full block bg-[var(--canvas-bg)] transition-colors duration-200 touch-none canvas-blink-effect"
+          className="absolute top-0 left-0 w-full h-full block bg-transparent transition-colors duration-200 touch-none canvas-blink-effect"
           style={{
             cursor: currentTool === 'pan' ? 'grab' : 'crosshair'
           }}

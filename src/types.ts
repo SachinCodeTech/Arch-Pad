@@ -6,6 +6,10 @@ export interface Project {
   scale: string;
   userId?: string;
   isSyncing?: boolean;
+  paperSize?: 'A3' | 'A4' | 'A8' | 'custom';
+  orientation?: 'horizontal' | 'portrait';
+  customWidth?: number;
+  customHeight?: number;
 }
 
 export interface Drawing {
@@ -55,3 +59,34 @@ export const PEN_SIZES: [number, string, string][] = [
   [45.0, "4.5mm", "Marker Max"],
   [50.0, "5.0mm", "Brush"]
 ];
+
+export function getPaperDimensions(
+  paperSize?: 'A3' | 'A4' | 'A8' | 'custom',
+  orientation?: 'horizontal' | 'portrait',
+  customWidth?: number,
+  customHeight?: number
+): { width: number; height: number } {
+  const size = paperSize || 'A4';
+  const orient = orientation || 'horizontal';
+  let w = 2970;
+  let h = 2100;
+  
+  if (size === 'A3') {
+    w = 4200;
+    h = 2970;
+  } else if (size === 'A4') {
+    w = 2970;
+    h = 2100;
+  } else if (size === 'A8') {
+    w = 740;
+    h = 520;
+  } else if (size === 'custom') {
+    w = customWidth || 3000;
+    h = customHeight || 2000;
+  }
+  
+  if (orient === 'portrait') {
+    return { width: h, height: w };
+  }
+  return { width: w, height: h };
+}

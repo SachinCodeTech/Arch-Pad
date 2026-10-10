@@ -23,6 +23,7 @@ interface ToolbarProps {
   zoom: number;
   setZoom: (f: number | ((prev: number) => number)) => void;
   setPanOffset: (offset: { x: number; y: number } | ((prev: { x: number; y: number }) => { x: number; y: number })) => void;
+  onZoomToFit: () => void;
 }
 
 type TabCategory = 'pen' | 'shapes' | 'actions' | 'view';
@@ -48,7 +49,8 @@ export default function Toolbar({
   setTheme,
   zoom,
   setZoom,
-  setPanOffset
+  setPanOffset,
+  onZoomToFit
 }: ToolbarProps) {
   const [pullupOpen, setPullupOpen] = useState(false);
   const [activeCat, setActiveCat] = useState<TabCategory>('pen');
@@ -506,6 +508,19 @@ export default function Toolbar({
             className="w-[20px] h-[20px] flex items-center justify-center font-sans text-[11px] font-[900] bg-[var(--bg3)] hover:bg-[var(--bg4)] border border-[var(--border2)] rounded-[4px] text-white hover:scale-[1.05] active:scale-[0.95] transition cursor-pointer"
           >
             －
+          </button>
+
+          {/* Fit Page button */}
+          <button
+            title="Fit Page to Screen"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onZoomToFit();
+            }}
+            className="w-[28px] h-[20px] flex items-center justify-center font-mono text-[8px] font-bold bg-[var(--bg3)] hover:bg-[var(--bg4)] border border-[var(--border2)] rounded-[4px] text-[var(--accent)] hover:scale-[1.05] active:scale-[0.95] transition cursor-pointer"
+          >
+            FIT
           </button>
 
           {/* Mini Separator */}

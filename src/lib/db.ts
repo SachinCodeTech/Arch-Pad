@@ -108,6 +108,32 @@ export async function deleteLocalProject(id: string): Promise<void> {
   });
 }
 
+export interface DrawingRecord {
+  projectId: string;
+  canvasData: string;
+  refImageData?: string;
+  refImageOpacity?: number;
+  paperOpacity?: number;
+  modified: number;
+}
+
+export async function getLocalDrawingRecord(projectId: string): Promise<DrawingRecord | null> {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('drawings', 'readonly');
+    const store = tx.objectStore('drawings');
+    const request = store.get(projectId);
+
+    request.onsuccess = () => {
+      resolve(request.result || null);
+    };
+
+    request.onerror = () => {
+      reject(request.error);
+    };
+  });
+}
+
 export async function getLocalDrawing(projectId: string): Promise<string> {
   const db = await getDB();
   return new Promise((resolve, reject) => {
@@ -125,24 +151,45 @@ export async function getLocalDrawing(projectId: string): Promise<string> {
   });
 }
 
-export async function saveLocalDrawing(projectId: string, canvasData: string): Promise<void> {
+export async function saveLocalDrawing(
+  projectId: string, 
+  canvasData: string,
+  refImageData?: string,
+  refImageOpacity?: number,
+  paperOpacity?: number
+): Promise<void> {
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('drawings', 'readwrite');
     const store = tx.objectStore('drawings');
-    const data = {
-      projectId,
-      canvasData,
-      modified: Date.now()
+    
+    const getReq = store.get(projectId);
+    getReq.onsuccess = () => {
+      const existing = getReq.result || {};
+      const data = {
+        projectId,
+        canvasData,
+        refImageData: refImageData !== undefined ? refImageData : existing.refImageData,
+        refImageOpacity: refImageOpacity !== undefined ? refImageOpacity : existing.refImageOpacity,
+        paperOpacity: paperOpacity !== undefined ? paperOpacity : existing.paperOpacity,
+        modified: Date.now()
+      };
+      const putReq = store.put(data);
+      putReq.onsuccess = () => resolve();
+      putReq.onerror = () => reject(putReq.error);
     };
-    const request = store.put(data);
-
-    request.onsuccess = () => {
-      resolve();
-    };
-
-    request.onerror = () => {
-      reject(request.error);
+    getReq.onerror = () => {
+      const data = {
+        projectId,
+        canvasData,
+        refImageData,
+        refImageOpacity,
+        paperOpacity,
+        modified: Date.now()
+      };
+      const putReq = store.put(data);
+      putReq.onsuccess = () => resolve();
+      putReq.onerror = () => reject(putReq.error);
     };
   });
 }

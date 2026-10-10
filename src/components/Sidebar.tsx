@@ -24,6 +24,21 @@ interface SidebarProps {
   currentProject: string;
   onSwitchProject: (id: string) => void;
   onDeleteProject: (id: string) => void;
+  refImageSrc: string | null;
+  refImageOpacity: number;
+  paperOpacity: number;
+  onSetPaperOpacity: (op: number) => void;
+  onTriggerCapture: () => void;
+  onTriggerImport: () => void;
+  onSetRefImageOpacity: (op: number) => void;
+  onClearRefImage: () => void;
+  onUpdatePaperSettings: (
+    size: 'A3' | 'A4' | 'A8' | 'custom',
+    orient: 'horizontal' | 'portrait',
+    customW?: number,
+    customH?: number
+  ) => void;
+  onZoomToFit: () => void;
 }
 
 export default function Sidebar({
@@ -48,13 +63,25 @@ export default function Sidebar({
   projects,
   currentProject,
   onSwitchProject,
-  onDeleteProject
+  onDeleteProject,
+  refImageSrc,
+  refImageOpacity,
+  paperOpacity,
+  onSetPaperOpacity,
+  onTriggerCapture,
+  onTriggerImport,
+  onSetRefImageOpacity,
+  onClearRefImage,
+  onUpdatePaperSettings,
+  onZoomToFit
 }: SidebarProps) {
-  // Collapsible section state (Start with all sections collapsed by default as seen in image)
+  // Collapsible section state (Start with all sections collapsed by default except Reference which is useful layout help)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({
     cloud: true,
     projects: true,
     drawing: true,
+    reference: false,
+    paper: false,
     shapes: true,
     actions: true,
     app: true
@@ -72,6 +99,12 @@ export default function Sidebar({
   const showIosInstallBtn = isIOS && !isStandalone;
 
   const showInstall = !!pwaPrompt || showIosInstallBtn;
+
+  const activeProj = projects[currentProject];
+  const paperSize = activeProj?.paperSize || 'A4';
+  const orientation = activeProj?.orientation || 'horizontal';
+  const customW = activeProj?.customWidth || 3000;
+  const customH = activeProj?.customHeight || 2000;
 
   return (
     <>
@@ -107,13 +140,13 @@ export default function Sidebar({
           </button>
         </div>
 
-        {/* Local Storage Sandbox section */}
+        {/* Offline Secure Storage section */}
         <div className="sb-section p-[10px_10px_4px]">
           <div 
             className={`sb-section-label font-mono text-[8px] text-[var(--text2)] tracking-[2px] uppercase p-[0_4px_6px] select-none cursor-pointer flex justify-between items-center ${collapsed.cloud ? 'collapsed' : ''}`}
             onClick={() => toggleSection('cloud')}
           >
-            <span>Device Sandbox</span>
+            <span>Private Local Storage</span>
             <span className="text-[9px] font-sans text-[var(--text3)]">
               {collapsed.cloud ? '▶' : '▼'}
             </span>
@@ -124,7 +157,7 @@ export default function Sidebar({
           >
             <div className="p-2.5 mb-2 bg-[#4f8ef7]/5 border border-[#4f8ef7]/20 rounded-lg text-xs leading-normal">
               <div className="text-[#4f8ef7] text-[10px] font-mono uppercase mb-1 font-semibold flex items-center gap-1.5">
-                ● Client-Only Storage
+                ● Offline Secure Storage
               </div>
               <p className="text-[var(--text3)] text-[10px] leading-relaxed font-sans">
                 Your drawing and project files are stored securely inside your browser's private local IndexedDB cache. No data ever leaves your device.
@@ -359,6 +392,226 @@ export default function Sidebar({
               <span className="sb-ico text-[15px] w-[20px] text-center shrink-0">⊟</span>
               <span className="sb-lbl text-[12px] font-[600] flex-1">Drawing Scale</span>
             </div>
+          </div>
+        </div>
+        <div className="sb-divider h-[1px] bg-[var(--border)] m-[6px_10px]" />
+
+        {/* WORKSHEET PAPER FORMAT SECTION */}
+        <div className="sb-section p-[10px_10px_4px]">
+          <div 
+            className={`sb-section-label font-mono text-[8px] text-[var(--text2)] tracking-[2px] uppercase p-[0_4px_6px] select-none cursor-pointer flex justify-between items-center ${collapsed.paper ? 'collapsed' : ''}`}
+            onClick={() => toggleSection('paper')}
+          >
+            <span>Paper Format</span>
+            <span className="text-[9px] font-sans text-[var(--text3)]">
+              {collapsed.paper ? '▶' : '▼'}
+            </span>
+          </div>
+          <div 
+            className={`sb-section-body overflow-hidden transition-all duration-200 ${collapsed.paper ? 'collapsed' : ''}`}
+            style={{ maxHeight: collapsed.paper ? '0px' : '400px' }}
+          >
+            <div className="p-2 border border-[var(--border2)] rounded-[8px] bg-[var(--bg3)]/30 flex flex-col gap-2.5 mx-1 mb-2 font-sans">
+              
+              {/* Paper Selection Tabs */}
+              <div className="flex flex-col gap-1">
+                <span className="text-[9px] font-mono font-bold text-[var(--text2)] uppercase">Standard Size</span>
+                <div className="grid grid-cols-4 gap-1">
+                  {(['A3', 'A4', 'A8', 'custom'] as const).map((sz) => (
+                    <button
+                      key={sz}
+                      onClick={() => onUpdatePaperSettings(sz, orientation, customW, customH)}
+                      className={`font-semibold p-1.5 rounded-[4px] border cursor-pointer text-center text-[10px] transition-all duration-150 ${
+                        paperSize === sz
+                          ? 'bg-[#4f8ef7] text-white border-[#4f8ef7]'
+                          : 'bg-transparent text-[var(--text2)] border-[var(--border)] hover:bg-[var(--bg4)]'
+                      }`}
+                    >
+                      {sz.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Orientation Toggle */}
+              <div className="flex flex-col gap-1">
+                <span className="text-[9px] font-mono font-bold text-[var(--text2)] uppercase">Orientation</span>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    onClick={() => onUpdatePaperSettings(paperSize, 'horizontal', customW, customH)}
+                    className={`flex items-center justify-center gap-1.5 font-semibold p-1.5 rounded-[4px] border cursor-pointer text-center text-[10px] transition-all duration-150 ${
+                      orientation === 'horizontal'
+                        ? 'bg-[#4f8ef7]/15 text-[#4f8ef7] border-[#4f8ef7]/50 font-bold'
+                        : 'bg-transparent text-[var(--text2)] border-[var(--border)] hover:bg-[var(--bg4)]'
+                    }`}
+                  >
+                    <span>▬</span> Landscape
+                  </button>
+                  <button
+                    onClick={() => onUpdatePaperSettings(paperSize, 'portrait', customW, customH)}
+                    className={`flex items-center justify-center gap-1.5 font-semibold p-1.5 rounded-[4px] border cursor-pointer text-center text-[10px] transition-all duration-150 ${
+                      orientation === 'portrait'
+                        ? 'bg-[#4f8ef7]/15 text-[#4f8ef7] border-[#4f8ef7]/50 font-bold'
+                        : 'bg-transparent text-[var(--text2)] border-[var(--border)] hover:bg-[var(--bg4)]'
+                    }`}
+                  >
+                    <span>▮</span> Portrait
+                  </button>
+                </div>
+              </div>
+
+              {/* Custom Sizes Box */}
+              {paperSize === 'custom' && (
+                <div className="p-2 bg-[var(--bg4)]/50 rounded border border-[var(--border)] flex flex-col gap-1.5 mt-0.5 animation-fade-in">
+                  <span className="text-[9px] font-mono text-[var(--text2)] uppercase font-semibold">Custom Dimension (px)</span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 flex flex-col gap-0.5">
+                      <span className="text-[8px] text-[var(--text3)] uppercase">Width</span>
+                      <input
+                        type="number"
+                        min="200"
+                        max="8000"
+                        value={customW}
+                        onChange={(e) => onUpdatePaperSettings('custom', orientation, parseInt(e.target.value) || 3000, customH)}
+                        className="w-full bg-[var(--bg2)] border border-[var(--border2)] rounded p-1 text-[10px] font-mono text-[var(--text)] outline-none focus:border-[#4f8ef7]"
+                      />
+                    </div>
+                    <span className="text-[10px] text-[var(--text3)] align-middle self-end pb-1.5 font-bold">×</span>
+                    <div className="flex-1 flex flex-col gap-0.5">
+                      <span className="text-[8px] text-[var(--text3)] uppercase">Height</span>
+                      <input
+                        type="number"
+                        min="200"
+                        max="8000"
+                        value={customH}
+                        onChange={(e) => onUpdatePaperSettings('custom', orientation, customW, parseInt(e.target.value) || 2000)}
+                        className="w-full bg-[var(--bg2)] border border-[var(--border2)] rounded p-1 text-[10px] font-mono text-[var(--text)] outline-none focus:border-[#4f8ef7]"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Summary Stats badge */}
+              <div className="text-[8px] leading-[1.3] text-[var(--text3)] font-mono uppercase bg-[var(--bg4)]/80 p-2 rounded border border-[var(--border)] flex justify-between select-none">
+                <span>Workspace Size:</span>
+                <span className="text-[var(--text2)] font-bold">
+                  {paperSize === 'custom' ? `${customW} × ${customH} px` : `${paperSize === 'A3' ? (orientation === 'horizontal' ? '4200 × 2970' : '2970 × 4200') : paperSize === 'A4' ? (orientation === 'horizontal' ? '2970 × 2100' : '2100 × 2970') : (orientation === 'horizontal' ? '740 × 520' : '520 × 740')} px`}
+                </span>
+              </div>
+
+              {/* Reset Zoom & Fit Page to screen */}
+              <button
+                type="button"
+                onClick={onZoomToFit}
+                className="w-full mt-2.5 py-1.5 bg-gradient-to-r from-[#4f8ef7]/10 to-[#7c5cf7]/10 border border-[#4f8ef7]/30 hover:border-[#4f8ef7]/60 text-[10px] text-[#4f8ef7] font-mono rounded flex items-center justify-center gap-1.5 cursor-pointer hover:bg-[var(--bg3)] active:scale-95 transition tracking-[0.5px] uppercase font-bold"
+              >
+                ✥ Fit Page to Screen
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="sb-divider h-[1px] bg-[var(--border)] m-[6px_10px]" />
+
+        {/* TRACING OVERLAY LAYER SECTION */}
+        <div className="sb-section p-[10px_10px_4px]">
+          <div 
+            className={`sb-section-label font-mono text-[8px] text-[var(--text2)] tracking-[2px] uppercase p-[0_4px_6px] select-none cursor-pointer flex justify-between items-center ${collapsed.reference ? 'collapsed' : ''}`}
+            onClick={() => toggleSection('reference')}
+          >
+            <span>Tracing Overlay</span>
+            <span className="text-[9px] font-sans text-[var(--text3)]">
+              {collapsed.reference ? '▶' : '▼'}
+            </span>
+          </div>
+          <div 
+            className={`sb-section-body overflow-hidden transition-all duration-200 ${collapsed.reference ? 'collapsed' : ''}`}
+            style={{ maxHeight: collapsed.reference ? '0px' : '400px' }}
+          >
+            {!refImageSrc ? (
+              <div className="p-2 border border-dashed border-[var(--border)] rounded-[8px] flex flex-col items-center justify-center gap-2 text-center bg-[var(--bg3)]/30 mx-1 mb-2">
+                <span className="text-[14px]">🖼️</span>
+                <p className="text-[10px] text-[var(--text2)] leading-[1.3] m-0">
+                  Import a floor plan, site drawing, or blueprint as a trace reference.
+                </p>
+                <div className="flex w-full gap-1.5 mt-1">
+                  <button
+                    onClick={() => {
+                      onTriggerCapture();
+                      onClose();
+                    }}
+                    className="flex-1 bg-[#4f8ef7] hover:bg-[#4f8ef7]/90 text-white font-sans text-[10px] font-bold p-1.5 rounded-[6px] border-none cursor-pointer transition flex items-center justify-center gap-1"
+                  >
+                    <span>📷</span> Photo
+                  </button>
+                  <button
+                    onClick={() => {
+                      onTriggerImport();
+                      onClose();
+                    }}
+                    className="flex-1 bg-[var(--bg3)] border border-[var(--border2)] text-[var(--text)] hover:bg-[var(--bg4)] font-sans text-[10px] font-bold p-1.5 rounded-[6px] cursor-pointer transition flex items-center justify-center gap-1"
+                  >
+                    <span>🖼️</span> Import
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-2 border border-[var(--border2)] rounded-[8px] bg-[var(--bg3)]/40 flex flex-col gap-2 mx-1 mb-2">
+                <div className="flex items-center justify-between gap-1 border-b border-[var(--border)] pb-2 mb-1">
+                  <div className="flex items-center gap-1 min-w-0">
+                    <span className="text-[11px]">✨</span>
+                    <span className="text-[10px] font-bold text-[var(--text)] truncate">Reference Image Active</span>
+                  </div>
+                  <button
+                    onClick={onClearRefImage}
+                    title="Remove Reference Image"
+                    className="bg-transparent border-none text-[var(--red)] font-semibold text-[10px] cursor-pointer p-0.5 hover:bg-red-500/10 rounded shrink-0"
+                  >
+                    ✕ Remove
+                  </button>
+                </div>
+                
+                {/* Opacity Control Slider */}
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-semibold text-[var(--text2)]">Reference Opacity</span>
+                    <span className="text-[9px] font-mono text-[#4f8ef7] font-bold">{Math.round(refImageOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={refImageOpacity}
+                    onChange={(e) => onSetRefImageOpacity(parseFloat(e.target.value))}
+                    className="w-full h-1 bg-[var(--border)] rounded-lg appearance-none cursor-pointer accent-[#4f8ef7]"
+                  />
+                </div>
+
+                {/* Drafting Paper Opacity Control Slider */}
+                <div className="flex flex-col gap-1 mt-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-semibold text-[var(--text2)]">Front Paper Opacity</span>
+                    <span className="text-[9px] font-mono text-[#10b981] font-bold">{Math.round(paperOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={paperOpacity}
+                    onChange={(e) => onSetPaperOpacity(parseFloat(e.target.value))}
+                    className="w-full h-1 bg-[var(--border)] rounded-lg appearance-none cursor-pointer accent-[#10b981]"
+                  />
+                </div>
+                
+                {/* Overlay helper guidelines for tracer */}
+                <div className="text-[8px] leading-[1.3] text-[var(--text3)] font-mono uppercase bg-[var(--bg4)]/80 p-1.5 rounded border border-[var(--border)] mt-1 select-none">
+                  Tracer lock: Hold [SHIFT] to lock snap angles. Draw blueprints on top.
+                </div>
+              </div>
+            )}
           </div>
         </div>
         <div className="sb-divider h-[1px] bg-[var(--border)] m-[6px_10px]" />

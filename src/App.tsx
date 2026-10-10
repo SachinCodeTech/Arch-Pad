@@ -6,13 +6,14 @@ import Toolbar from './components/Toolbar';
 import Modals from './components/Modals';
 import Toast from './components/Toast';
 
-import { Project, ToolType, ThemeType } from './types';
+import { Project, ToolType, ThemeType, getPaperDimensions } from './types';
 import {
   getLocalProjects,
   saveLocalProject,
   deleteLocalProject,
   getLocalDrawing,
-  saveLocalDrawing
+  saveLocalDrawing,
+  getLocalDrawingRecord
 } from './lib/db';
 // Local offline secure mode
 
@@ -94,6 +95,12 @@ export default function App() {
   const startPanPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const initialPanOffset = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
+  // Background tracing template overlays
+  const [refImageSrc, setRefImageSrc] = useState<string | null>(null);
+  const [refImageOpacity, setRefImageOpacity] = useState<number>(0.4);
+  const [paperOpacity, setPaperOpacity] = useState<number>(1.0);
+  const [refImageElement, setRefImageElement] = useState<HTMLImageElement | null>(null);
+
   const showToast = (msg: string, stat: 'success' | 'info' | null = null) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     setToastMessage(msg);
@@ -149,6 +156,22 @@ export default function App() {
     if (appReady) redrawVisibleCanvas();
   }, [currentTool, appReady]);
 
+  // Load and cache reference image element for instant canvas rendering when source image state changes
+  useEffect(() => {
+    if (refImageSrc) {
+      const img = new Image();
+      img.onload = () => {
+        setRefImageElement(img);
+      };
+      img.onerror = (err) => {
+        console.error("Tracing image loading error:", err);
+      };
+      img.src = refImageSrc;
+    } else {
+      setRefImageElement(null);
+    }
+  }, [refImageSrc]);
+
   // No external cloud auth needed
 
   // 1. Initial workspace Load
@@ -203,6 +226,9 @@ export default function App() {
     setAppReady(true);
     triggerPreserveResize();
     updateStorageUsageCount();
+    setTimeout(() => {
+      handleZoomToFit();
+    }, 50);
   };
 
   // Periodic autosave monitoring
@@ -223,7 +249,7 @@ export default function App() {
         clearBgCADGrid();
       }
     }
-  }, [zoom, panOffset, gridVisible, theme, appReady]);
+  }, [zoom, panOffset, gridVisible, theme, appReady, refImageSrc, refImageElement, refImageOpacity, paperOpacity]);
 
   // Adjust document body theme styling
   useEffect(() => {
@@ -248,14 +274,36 @@ export default function App() {
   }, [currentProject, appReady]);
 
   const initOffscreenCanvas = () => {
+    const matchProj = projects[currentProject];
+    const paperSize = matchProj?.paperSize;
+    const orientation = matchProj?.orientation;
+    const customW = matchProj?.customWidth;
+    const customH = matchProj?.customHeight;
+    const { width, height } = getPaperDimensions(paperSize, orientation, customW, customH);
+
     if (!offscreenCanvasRef.current) {
       offscreenCanvasRef.current = document.createElement('canvas');
-      offscreenCanvasRef.current.width = 3000;
-      offscreenCanvasRef.current.height = 2000;
+      offscreenCanvasRef.current.width = width;
+      offscreenCanvasRef.current.height = height;
       const oCtx = offscreenCanvasRef.current.getContext('2d');
       if (oCtx) {
-        oCtx.fillStyle = theme === 'light' ? '#ffffff' : '#fafaf8';
-        oCtx.fillRect(0, 0, 3000, 2000);
+        oCtx.clearRect(0, 0, width, height);
+      }
+    } else if (offscreenCanvasRef.current.width !== width || offscreenCanvasRef.current.height !== height) {
+      const temp = document.createElement('canvas');
+      temp.width = offscreenCanvasRef.current.width;
+      temp.height = offscreenCanvasRef.current.height;
+      const tempCtx = temp.getContext('2d');
+      if (tempCtx) {
+        tempCtx.drawImage(offscreenCanvasRef.current, 0, 0);
+      }
+      
+      offscreenCanvasRef.current.width = width;
+      offscreenCanvasRef.current.height = height;
+      const oCtx = offscreenCanvasRef.current.getContext('2d');
+      if (oCtx) {
+        oCtx.clearRect(0, 0, width, height);
+        oCtx.drawImage(temp, 0, 0, width, height);
       }
     }
   };
@@ -287,21 +335,58 @@ export default function App() {
       const w = offscreenCanvasRef.current.width;
       const h = offscreenCanvasRef.current.height;
 
-      // Add a subtle border/shadow for the drafting sheet, making it look incredibly realistic!
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-      ctx.shadowBlur = 12;
+      // 1. --- SOLID PAPER BACKING SHEET (fully opaque draft sheet with shadow) ---
+      ctx.save();
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
+      ctx.shadowBlur = 10;
       ctx.shadowOffsetX = 3;
       ctx.shadowOffsetY = 6;
-
       ctx.fillStyle = theme === 'light' ? '#ffffff' : '#fafaf8';
       ctx.fillRect(0, 0, w, h);
+      ctx.restore();
 
-      ctx.shadowColor = 'transparent';
-      ctx.shadowBlur = 0;
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 0;
+      // 2. --- BACKGROUND REFERENCE TRACING TEMPLATE LAYER (directly on top of backing sheet) ---
+      if (refImageSrc && refImageElement) {
+        ctx.save();
+        ctx.globalAlpha = refImageOpacity;
+        
+        const img = refImageElement;
+        const imgRatio = img.width / img.height;
+        const canvasRatio = w / h;
+        
+        let targetW = w;
+        let targetH = h;
+        let targetX = 0;
+        let targetY = 0;
+        
+        if (imgRatio > canvasRatio) {
+          targetW = w;
+          targetH = w / imgRatio;
+          targetY = (h - targetH) / 2;
+        } else {
+          targetH = h;
+          targetW = h * imgRatio;
+          targetX = (w - targetW) / 2;
+        }
+        
+        try {
+          ctx.drawImage(img, targetX, targetY, targetW, targetH);
+        } catch (e) {
+          console.warn("Reference image drawing failed:", e);
+        }
+        ctx.restore();
+      }
 
-      // Draw client artwork
+      // 3. --- FRONT PAPER SHEET OVERLAY (fades/masks the reference image below) ---
+      if (paperOpacity > 0.0) {
+        ctx.save();
+        ctx.globalAlpha = paperOpacity;
+        ctx.fillStyle = theme === 'light' ? '#ffffff' : '#fafaf8';
+        ctx.fillRect(0, 0, w, h);
+        ctx.restore();
+      }
+
+      // 4. --- DRAW CLIENT BLUEPRINT ACTIVE ARTWORK ---
       ctx.drawImage(offscreenCanvasRef.current, 0, 0);
 
       // --- ADVANCED DYNAMIC CAD BLUEPRINT LAYER ---
@@ -415,9 +500,8 @@ export default function App() {
     const oCtx = oCanvas.getContext('2d');
     if (!oCtx) return;
 
-    // Reset offscreen to solid white/light background
-    oCtx.fillStyle = theme === 'light' ? '#ffffff' : '#fafaf8';
-    oCtx.fillRect(0, 0, oCanvas.width, oCanvas.height);
+    // Reset offscreen to fully transparent drafting workspace
+    oCtx.clearRect(0, 0, oCanvas.width, oCanvas.height);
 
     setHistory([]);
     setHistoryIndex(-1);
@@ -425,22 +509,90 @@ export default function App() {
     const matchProj = projects[currentProject];
     if (matchProj) {
       setScale(matchProj.scale);
-      const cached = await getLocalDrawing(matchProj.id);
-      if (cached) {
-        const img = new Image();
-        img.onload = () => {
-          oCtx.drawImage(img, 0, 0);
+      try {
+        const record = await getLocalDrawingRecord(matchProj.id);
+        if (record) {
+          setRefImageSrc(record.refImageData || null);
+          setRefImageOpacity(record.refImageOpacity !== undefined ? record.refImageOpacity : 0.4);
+          
+          if (record.paperOpacity !== undefined) {
+            setPaperOpacity(record.paperOpacity);
+          } else {
+            setPaperOpacity(record.refImageData ? 0.7 : 1.0);
+          }
+
+          if (record.canvasData) {
+            const img = new Image();
+            img.onload = () => {
+              oCtx.drawImage(img, 0, 0, oCanvas.width, oCanvas.height);
+              
+              // Process pixels to remove solid white background fill (legacy fallback fixes)
+              try {
+                const imgData = oCtx.getImageData(0, 0, oCanvas.width, oCanvas.height);
+                const data = imgData.data;
+                let modified = false;
+                for (let i = 0; i < data.length; i += 4) {
+                  const r = data[i];
+                  const g = data[i+1];
+                  const b = data[i+2];
+                  const a = data[i+3];
+                  // If the pixel is close to solid white, make it fully transparent (alpha = 0)
+                  if (a > 0 && r > 248 && g > 248 && b > 248) {
+                    data[i+3] = 0;
+                    modified = true;
+                  }
+                }
+                if (modified) {
+                  oCtx.putImageData(imgData, 0, 0);
+                }
+              } catch (e) {
+                console.warn('Could not filter white pixels:', e);
+              }
+
+              takeSnapSnapshot();
+              redrawVisibleCanvas();
+              setTimeout(() => {
+                handleZoomToFit();
+              }, 50);
+            };
+            img.src = record.canvasData;
+          } else {
+            takeSnapSnapshot();
+            redrawVisibleCanvas();
+            setTimeout(() => {
+              handleZoomToFit();
+            }, 50);
+          }
+        } else {
+          setRefImageSrc(null);
+          setRefImageOpacity(0.4);
+          setPaperOpacity(1.0);
           takeSnapSnapshot();
           redrawVisibleCanvas();
-        };
-        img.src = cached;
-      } else {
+          setTimeout(() => {
+            handleZoomToFit();
+          }, 50);
+        }
+      } catch (err) {
+        console.warn('Error fetching drawing record:', err);
+        setRefImageSrc(null);
+        setRefImageOpacity(0.4);
+        setPaperOpacity(1.0);
         takeSnapSnapshot();
         redrawVisibleCanvas();
+        setTimeout(() => {
+          handleZoomToFit();
+        }, 50);
       }
     } else {
+      setRefImageSrc(null);
+      setRefImageOpacity(0.4);
+      setPaperOpacity(1.0);
       takeSnapSnapshot();
       redrawVisibleCanvas();
+      setTimeout(() => {
+        handleZoomToFit();
+      }, 50);
     }
   };
 
@@ -463,6 +615,39 @@ export default function App() {
 
     // Direct redraw from stable offscreen canvas
     redrawVisibleCanvas();
+  };
+
+  const handleZoomToFit = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const parent = canvas.parentElement;
+    if (!parent || !parent.clientWidth || !parent.clientHeight) return;
+
+    const matchProj = projects[currentProject];
+    const paperSize = matchProj?.paperSize || 'A4';
+    const orientation = matchProj?.orientation || 'horizontal';
+    const customW = matchProj?.customWidth;
+    const customH = matchProj?.customHeight;
+    const { width: pW, height: pH } = getPaperDimensions(paperSize, orientation, customW, customH);
+
+    const padding = 32;
+    const availableW = parent.clientWidth - padding * 2;
+    const availableH = parent.clientHeight - padding * 2;
+
+    const zoomX = availableW / pW;
+    const zoomY = availableH / pH;
+    const newZoom = Math.max(0.12, Math.min(zoomX, zoomY, 2.5));
+
+    const panX = (parent.clientWidth - pW * newZoom) / 2;
+    const panY = (parent.clientHeight - pH * newZoom) / 2;
+
+    setZoom(newZoom);
+    setPanOffset({ x: panX, y: panY });
+
+    setTimeout(() => {
+      redrawVisibleCanvas();
+      if (gridVisible) drawBgCADGrid();
+    }, 0);
   };
 
   // Background CAD GRID drawings (dynamic panning and zooming infinite grids)
@@ -728,6 +913,10 @@ export default function App() {
       takeSnapSnapshot();
       strokePoints.current = [{ x, y }];
 
+      oCtx.save();
+      if (currentTool === 'eraser') {
+        oCtx.globalCompositeOperation = 'destination-out';
+      }
       oCtx.beginPath();
       oCtx.arc(
         x,
@@ -737,9 +926,9 @@ export default function App() {
         Math.PI * 2
       );
       
-      const isLight = theme === 'light';
-      oCtx.fillStyle = currentTool === 'eraser' ? (isLight ? '#ffffff' : '#fafaf8') : pencilColor;
+      oCtx.fillStyle = currentTool === 'eraser' ? 'rgba(0,0,0,1)' : pencilColor;
       oCtx.fill();
+      oCtx.restore();
 
       redrawVisibleCanvas();
     } else {
@@ -811,6 +1000,11 @@ export default function App() {
       const pts = strokePoints.current;
       pts.push({ x, y });
 
+      oCtx.save();
+      if (currentTool === 'eraser') {
+        oCtx.globalCompositeOperation = 'destination-out';
+      }
+
       if (pts.length > 2) {
         const prevMidX = (pts[pts.length - 3].x + pts[pts.length - 2].x) / 2;
         const prevMidY = (pts[pts.length - 3].y + pts[pts.length - 2].y) / 2;
@@ -823,8 +1017,7 @@ export default function App() {
         oCtx.lineWidth = currentTool === 'eraser' ? pencilSize * 3 : pencilSize;
         oCtx.lineCap = 'round';
         oCtx.lineJoin = 'round';
-        const bgHex = theme === 'light' ? '#ffffff' : '#fafaf8';
-        oCtx.strokeStyle = currentTool === 'eraser' ? bgHex : pencilColor;
+        oCtx.strokeStyle = currentTool === 'eraser' ? 'rgba(0,0,0,1)' : pencilColor;
         oCtx.stroke();
       } else if (pts.length === 2) {
         oCtx.beginPath();
@@ -833,11 +1026,11 @@ export default function App() {
         oCtx.lineWidth = currentTool === 'eraser' ? pencilSize * 3 : pencilSize;
         oCtx.lineCap = 'round';
         oCtx.lineJoin = 'round';
-        const bgHex = theme === 'light' ? '#ffffff' : '#fafaf8';
-        oCtx.strokeStyle = currentTool === 'eraser' ? bgHex : pencilColor;
+        oCtx.strokeStyle = currentTool === 'eraser' ? 'rgba(0,0,0,1)' : pencilColor;
         oCtx.stroke();
       }
       
+      oCtx.restore();
       startPoints.current = { x, y };
       redrawVisibleCanvas();
     } else {
@@ -1020,12 +1213,120 @@ export default function App() {
       const oCtx = oCanvas.getContext('2d');
       if (oCtx) {
         takeSnapSnapshot();
-        oCtx.fillStyle = theme === 'light' ? '#ffffff' : '#fafaf8';
-        oCtx.fillRect(0, 0, oCanvas.width, oCanvas.height);
+        oCtx.clearRect(0, 0, oCanvas.width, oCanvas.height);
         redrawVisibleCanvas();
         showToast('Draft space cleared');
         triggerQuickAutoSaveDelay();
       }
+    }
+  };
+
+  // Tracing layer controllers
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+
+  const triggerImportFile = () => {
+    fileInputRef.current?.click();
+  };
+
+  const triggerCapturePhoto = () => {
+    cameraInputRef.current?.click();
+  };
+
+  const handleSetRefImageOpacity = async (opValue: number) => {
+    setRefImageOpacity(opValue);
+    
+    // Save opacity preference to DB so it persists on reload
+    const matchProj = projects[currentProject];
+    if (matchProj) {
+      const canvas = offscreenCanvasRef.current;
+      const canvasDataUrl = canvas ? canvas.toDataURL() : '';
+      await saveLocalDrawing(matchProj.id, canvasDataUrl, undefined, opValue);
+    }
+  };
+
+  const handleSetPaperOpacity = async (opValue: number) => {
+    setPaperOpacity(opValue);
+    
+    // Save opacity preference to DB so it persists on reload
+    const matchProj = projects[currentProject];
+    if (matchProj) {
+      const canvas = offscreenCanvasRef.current;
+      const canvasDataUrl = canvas ? canvas.toDataURL() : '';
+      await saveLocalDrawing(matchProj.id, canvasDataUrl, undefined, undefined, opValue);
+    }
+  };
+
+  const handleClearRefImage = async () => {
+    setRefImageSrc(null);
+    setRefImageElement(null);
+    setPaperOpacity(1.0); // Reset front paper structure back to fully solid
+    showToast('Reference layer removed', 'info');
+    
+    // Clear reference image in DB registry
+    const matchProj = projects[currentProject];
+    if (matchProj) {
+      const canvas = offscreenCanvasRef.current;
+      const canvasDataUrl = canvas ? canvas.toDataURL() : '';
+      await saveLocalDrawing(matchProj.id, canvasDataUrl, '', 0.4, 1.0);
+    }
+  };
+
+  const handleRefFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const dataUrl = event.target?.result as string;
+      if (dataUrl) {
+        setRefImageSrc(dataUrl);
+        setPaperOpacity(0.7); // Auto set paper to transparent tracing layer!
+        showToast('Reference layer loaded successfully.', 'success');
+        
+        // Save the reference image to IDB
+        const matchProj = projects[currentProject];
+        if (matchProj) {
+          const canvas = offscreenCanvasRef.current;
+          const canvasDataUrl = canvas ? canvas.toDataURL() : '';
+          await saveLocalDrawing(matchProj.id, canvasDataUrl, dataUrl, refImageOpacity, 0.7);
+        }
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = ''; // Reset file input so same file can be reloaded
+  };
+
+  const handleUpdatePaperSettings = async (
+    size: 'A3' | 'A4' | 'A8' | 'custom',
+    orient: 'horizontal' | 'portrait',
+    customW?: number,
+    customH?: number
+  ) => {
+    const matchProj = projects[currentProject];
+    if (matchProj) {
+      const updatedProj: Project = {
+        ...matchProj,
+        paperSize: size,
+        orientation: orient,
+        customWidth: customW,
+        customHeight: customH,
+        modified: Date.now()
+      };
+      
+      setProjects((prev) => ({
+        ...prev,
+        [currentProject]: updatedProj
+      }));
+      
+      await saveLocalProject(updatedProj);
+      
+      // Delay slightly to allow React state batching to register if needed, then reinit canvas
+      setTimeout(() => {
+        initOffscreenCanvas();
+        redrawVisibleCanvas();
+        showToast(`Workspace sized to ${size.toUpperCase()} (${orient})`, 'success');
+      }, 0);
     }
   };
 
@@ -1039,7 +1340,7 @@ export default function App() {
 
   const handleSilentAutoSave = async () => {
     initOffscreenCanvas();
-    const canvas = offscreenCanvasRef.current || canvasRef.current;
+    const canvas = offscreenCanvasRef.current;
     if (!canvas) return;
 
     setAutoSaveStatus('saving');
@@ -1425,6 +1726,7 @@ export default function App() {
           zoom={zoom}
           setZoom={setZoom}
           setPanOffset={setPanOffset}
+          onZoomToFit={handleZoomToFit}
         />
 
         {/* DIALOG PREFERENCE WINDOWS */}
@@ -1443,6 +1745,12 @@ export default function App() {
           storageUsedInfo={storageUsedInfo}
           onClearCanvas={handleClearCanvasNow}
           onImportBackup={handleImportBackup}
+          offscreenCanvasRef={offscreenCanvasRef}
+          refImageSrc={refImageSrc}
+          refImageOpacity={refImageOpacity}
+          refImageElement={refImageElement}
+          paperOpacity={paperOpacity}
+          theme={theme}
         />
 
         {/* TOAST PANEL BAR ALERT */}
@@ -1475,6 +1783,33 @@ export default function App() {
           currentProject={currentProject}
           onSwitchProject={handleSwitchProject}
           onDeleteProject={handleDeleteProject}
+          refImageSrc={refImageSrc}
+          refImageOpacity={refImageOpacity}
+          paperOpacity={paperOpacity}
+          onSetPaperOpacity={handleSetPaperOpacity}
+          onTriggerCapture={triggerCapturePhoto}
+          onTriggerImport={triggerImportFile}
+          onSetRefImageOpacity={handleSetRefImageOpacity}
+          onClearRefImage={handleClearRefImage}
+          onUpdatePaperSettings={handleUpdatePaperSettings}
+          onZoomToFit={handleZoomToFit}
+        />
+
+        {/* HIDDEN TRACING FILE SELECTORS */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={handleRefFileChange}
+        />
+        <input
+          type="file"
+          ref={cameraInputRef}
+          accept="image/*"
+          capture="environment"
+          style={{ display: 'none' }}
+          onChange={handleRefFileChange}
         />
 
       </div>

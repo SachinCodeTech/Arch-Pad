@@ -16,6 +16,12 @@ interface ModalsProps {
   storageUsedInfo: string;
   onClearCanvas: () => void;
   onImportBackup: (backupData: any) => void;
+  offscreenCanvasRef: React.RefObject<HTMLCanvasElement | null>;
+  refImageSrc: string | null;
+  refImageOpacity: number;
+  refImageElement: HTMLImageElement | null;
+  paperOpacity?: number;
+  theme: 'light' | 'dark';
 }
 
 export default function Modals({
@@ -32,7 +38,13 @@ export default function Modals({
   canvasRef,
   storageUsedInfo,
   onClearCanvas,
-  onImportBackup
+  onImportBackup,
+  offscreenCanvasRef,
+  refImageSrc,
+  refImageOpacity,
+  refImageElement,
+  paperOpacity,
+  theme
 }: ModalsProps) {
   const [newProjName, setNewProjName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -77,16 +89,24 @@ export default function Modals({
 
   const generateExportCardCanvas = (srcCanvas: HTMLCanvasElement): HTMLCanvasElement => {
     const card = document.createElement('canvas');
-    const dw = srcCanvas.width;
-    const dh = srcCanvas.height;
+    
+    // Use the high-res offscreen canvas if available, otherwise fallback to standard screen canvas!
+    const oCanvas = offscreenCanvasRef.current || srcCanvas;
+    const dw = oCanvas.width;
+    const dh = oCanvas.height;
 
-    const headerHeight = 72;
-    const footerHeight = 44;
-    const paddingX = 14;
-    const paddingY = 10;
+    // We scale the margins, header heights, logo details, and font sizes proportionally to the drawing's high-resolution width
+    const baseDesignWidth = 1000;
+    const paddingXVal = 14;
+    const width = dw + paddingXVal * 2;
+    const s = width / baseDesignWidth;
 
-    const hdScale = 3; // 3x High Definition scaling for sharp text and vectors
-    const width = dw + paddingX * 2;
+    const headerHeight = 72 * s;
+    const footerHeight = 44 * s;
+    const paddingX = paddingXVal * s;
+    const paddingY = 10 * s;
+
+    const hdScale = 1; // Since offscreen is already in native print DPI resolution, 1x scaling is perfect!
     const height = dh + headerHeight + footerHeight + paddingY * 2;
 
     card.width = width * hdScale;
@@ -115,42 +135,42 @@ export default function Modals({
     ctx.fillRect(0, 0, width, headerHeight);
 
     // Draw logo symbol (nesting custom purple architectural triangles matching app main logo) on left
-    const iconX = 20;
-    const iconY = 20;
-    const iconSize = 32;
+    const iconX = 20 * s;
+    const iconY = 20 * s;
+    const iconSize = 32 * s;
 
     ctx.save();
     ctx.translate(iconX, iconY);
 
     // Subtle dark background rounded button container filled with beautiful linearGradient matching APP_ICON_SVG deflect background
-    const bgGrad = ctx.createLinearGradient(0, 0, 32, 32);
+    const bgGrad = ctx.createLinearGradient(0, 0, 32 * s, 32 * s);
     bgGrad.addColorStop(0, '#0d1117');
     bgGrad.addColorStop(1, '#0a0a14');
     ctx.fillStyle = bgGrad;
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1 * s;
     ctx.beginPath();
     if (ctx.roundRect) {
-      ctx.roundRect(-2, -2, 36, 36, 8);
+      ctx.roundRect(-2 * s, -2 * s, 36 * s, 36 * s, 8 * s);
     } else {
-      ctx.rect(-2, -2, 36, 36);
+      ctx.rect(-2 * s, -2 * s, 36 * s, 36 * s);
     }
     ctx.fill();
     ctx.stroke();
 
     // Subtle background grid lines inside the mini icon (divide size 512 to scale)
     ctx.strokeStyle = 'rgba(79, 142, 247, 0.06)';
-    ctx.lineWidth = 0.5;
-    const gridCols = [8, 16, 24];
+    ctx.lineWidth = 0.5 * s;
+    const gridCols = [8 * s, 16 * s, 24 * s];
     for (let c of gridCols) {
       ctx.beginPath();
       ctx.moveTo(c, 0);
-      ctx.lineTo(c, 32);
+      ctx.lineTo(c, 32 * s);
       ctx.stroke();
 
       ctx.beginPath();
       ctx.moveTo(0, c);
-      ctx.lineTo(32, c);
+      ctx.lineTo(32 * s, c);
       ctx.stroke();
     }
 
@@ -159,48 +179,48 @@ export default function Modals({
     ctx.lineJoin = 'round';
     ctx.beginPath();
     
-    const ruleGrad = ctx.createLinearGradient(6, 24, 24, 24);
+    const ruleGrad = ctx.createLinearGradient(6 * s, 24 * s, 24 * s, 24 * s);
     ruleGrad.addColorStop(0, '#7c5cf7');
     ruleGrad.addColorStop(1, '#9b7fff');
     ctx.strokeStyle = ruleGrad;
-    ctx.lineWidth = 2.2; // ~20 / 512 * 32 * 1.5
+    ctx.lineWidth = 2.2 * s; // ~20 / 512 * 32 * 1.5
 
     // Triangles layout: bottom-left (6.8, 24.4), top-left (6.8, 8.8), bottom-right (23.1, 24.4)
-    ctx.moveTo(6.8, 24.4);
-    ctx.lineTo(6.8, 8.8);
-    ctx.lineTo(23.1, 24.4);
+    ctx.moveTo(6.8 * s, 24.4 * s);
+    ctx.lineTo(6.8 * s, 8.8 * s);
+    ctx.lineTo(23.1 * s, 24.4 * s);
     ctx.closePath();
     ctx.stroke();
 
     // Right angle mark at the bottom-left corner
     ctx.strokeStyle = 'rgba(124, 92, 247, 0.6)';
-    ctx.lineWidth = 0.8;
+    ctx.lineWidth = 0.8 * s;
     ctx.beginPath();
-    ctx.moveTo(6.8, 22.4);
-    ctx.lineTo(8.8, 22.4);
-    ctx.lineTo(8.8, 24.4);
+    ctx.moveTo(6.8 * s, 22.4 * s);
+    ctx.lineTo(8.8 * s, 22.4 * s);
+    ctx.lineTo(8.8 * s, 24.4 * s);
     ctx.stroke();
 
     // Tiny tick marks lines on bottom edge of the ruler exactly scaled
     ctx.strokeStyle = 'rgba(124, 92, 247, 0.5)';
-    ctx.lineWidth = 0.6;
-    const tickPositions = [9.5, 12.1, 14.7, 17.3, 20.0, 22.6];
+    ctx.lineWidth = 0.6 * s;
+    const tickPositions = [9.5 * s, 12.1 * s, 14.7 * s, 17.3 * s, 20.0 * s, 22.6 * s];
     for (let tx of tickPositions) {
       ctx.beginPath();
-      ctx.moveTo(tx, 24.4);
-      ctx.lineTo(tx, 22.4);
+      ctx.moveTo(tx, 24.4 * s);
+      ctx.lineTo(tx, 22.4 * s);
       ctx.stroke();
     }
 
     // Now draw the blue drafting pencil crossing diagonally!
     ctx.save();
     // Rotate of -38 degree around pivot point (18.1, 13.7) matching icon.svg
-    ctx.translate(18.1, 13.7);
+    ctx.translate(18.1 * s, 13.7 * s);
     ctx.rotate(-38 * Math.PI / 180);
 
     // Pencil Body coordinates relative to rotation (scaled from 512 to 32 sizing)
-    const pWidth = 2.5;
-    const pLength = 12.5;
+    const pWidth = 2.5 * s;
+    const pLength = 12.5 * s;
     const pencilGrad = ctx.createLinearGradient(-pWidth/2, 0, pWidth/2, 0);
     pencilGrad.addColorStop(0, '#6ab0ff');
     pencilGrad.addColorStop(1, '#4f8ef7');
@@ -212,40 +232,40 @@ export default function Modals({
     ctx.beginPath();
     ctx.moveTo(-pWidth/2, pLength/2);
     ctx.lineTo(pWidth/2, pLength/2);
-    ctx.lineTo(0, pLength/2 + 2.8);
+    ctx.lineTo(0, pLength/2 + 2.8 * s);
     ctx.closePath();
     ctx.fill();
 
     // Pencil Lead Tip (tiny dark tip)
     ctx.fillStyle = '#1a1a1a';
     ctx.beginPath();
-    ctx.moveTo(-pWidth/4, pLength/2 + 1.8);
-    ctx.lineTo(pWidth/4, pLength/2 + 1.8);
-    ctx.lineTo(0, pLength/2 + 2.8);
+    ctx.moveTo(-pWidth/4, pLength/2 + 1.8 * s);
+    ctx.lineTo(pWidth/4, pLength/2 + 1.8 * s);
+    ctx.lineTo(0, pLength/2 + 2.8 * s);
     ctx.closePath();
     ctx.fill();
 
     // Eraser cap at the top end
     ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-    ctx.fillRect(-pWidth/2, -pLength/2 - 1.1, pWidth, 1.1);
+    ctx.fillRect(-pWidth/2, -pLength/2 - 1.1 * s, pWidth, 1.1 * s);
 
     ctx.restore();
 
     ctx.restore();
 
     // Draw app brand title text next to logo: "Arch Pad" styled exactly like the UI gradient
-    const grad = ctx.createLinearGradient(iconX + iconSize + 12, 0, iconX + iconSize + 120, 0);
+    const grad = ctx.createLinearGradient(iconX + iconSize + 12 * s, 0, iconX + iconSize + 120 * s, 0);
     grad.addColorStop(0, '#4f8ef7');
     grad.addColorStop(1, '#7c5cf7');
     ctx.fillStyle = grad;
-    ctx.font = '800 20px "Syne", "Inter", sans-serif';
+    ctx.font = `800 ${Math.round(20 * s)}px "Syne", "Inter", sans-serif`;
     ctx.textBaseline = 'top';
-    ctx.fillText('Arch Pad', iconX + iconSize + 12, iconY - 1);
+    ctx.fillText('Arch Pad', iconX + iconSize + 12 * s, iconY - 1 * s);
 
     // Draw architectural sketchbook subtitle text: "ARCHITECTURAL SKETCHBOOK"
     ctx.fillStyle = '#5a73a3';
-    ctx.font = 'bold 8px "JetBrains Mono", monospace';
-    ctx.fillText('ARCHITECTURAL SKETCHBOOK', iconX + iconSize + 12, iconY + 18);
+    ctx.font = `bold ${Math.round(8 * s)}px "JetBrains Mono", monospace`;
+    ctx.fillText('ARCHITECTURAL SKETCHBOOK', iconX + iconSize + 12 * s, iconY + 18 * s);
 
     // Draw Date on Top-Right Corner of header: e.g. "04/06/2026"
     const today = new Date();
@@ -255,26 +275,66 @@ export default function Modals({
     const dateStr = `${d}/${m}/${y}`;
 
     ctx.fillStyle = '#5a73a3';
-    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+    ctx.font = `bold ${Math.round(11 * s)}px "JetBrains Mono", monospace`;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
-    ctx.fillText(dateStr, width - 20, headerHeight / 2);
+    ctx.fillText(dateStr, width - 20 * s, headerHeight / 2);
 
     // 3. Draw whiteboard inner background and canvas content
     const drawX = paddingX;
     const drawY = headerHeight + paddingY;
 
-    // Fill inner drawing area with crisp white
-    ctx.fillStyle = '#ffffff';
+    // 1. DRAW SOLID PAPER BACKING SHEET FIRST (prevents transparency leak on export)
+    ctx.fillStyle = theme === 'light' ? '#ffffff' : '#fafaf8';
     ctx.fillRect(drawX, drawY, dw, dh);
 
-    // Draw original canvas whiteboard contents onto it (fully opaque)
-    ctx.drawImage(srcCanvas, drawX, drawY);
+    // 2. DRAW BASE REFERENCE TRACING IMAGE IF IT EXISTS
+    if (refImageSrc && refImageElement) {
+      const img = refImageElement;
+      try {
+        const pw = dw;
+        const ph = dh;
+        const imgRatio = img.width / img.height;
+        const canvasRatio = pw / ph;
+        let targetW = pw;
+        let targetH = ph;
+        let targetX = 0;
+        let targetY = 0;
+        if (imgRatio > canvasRatio) {
+          targetW = pw;
+          targetH = pw / imgRatio;
+          targetY = (ph - targetH) / 2;
+        } else {
+          targetH = ph;
+          targetW = ph * imgRatio;
+          targetX = (pw - targetW) / 2;
+        }
+        ctx.save();
+        ctx.globalAlpha = refImageOpacity;
+        ctx.drawImage(img, drawX + targetX, drawY + targetY, targetW, targetH);
+        ctx.restore();
+      } catch (e) {
+        console.warn("Could not render reference overlay on export:", e);
+      }
+    }
+
+    // 3. FRONT PAPER SHEET OVERLAY (fades/masks the reference image below)
+    const activePaperOpacity = paperOpacity !== undefined ? paperOpacity : 1.0;
+    if (activePaperOpacity > 0.0) {
+      ctx.save();
+      ctx.globalAlpha = activePaperOpacity;
+      ctx.fillStyle = theme === 'light' ? '#ffffff' : '#fafaf8';
+      ctx.fillRect(drawX, drawY, dw, dh);
+      ctx.restore();
+    }
+
+    // 4. Draw original canvas whiteboard contents onto it (fully opaque)
+    ctx.drawImage(oCanvas, drawX, drawY);
 
     // Draw a neat solid border around whiteboard area so it looks beautifully framed
     ctx.strokeStyle = '#4f8ef7';
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(drawX - 1, drawY - 1, dw + 2, dh + 2);
+    ctx.lineWidth = 1.5 * s;
+    ctx.strokeRect(drawX - 1 * s, drawY - 1 * s, dw + 2 * s, dh + 2 * s);
 
     // 4. Overlap floating badges inside whiteboard
     // Sketch project name (Top-Left corner)
@@ -282,26 +342,26 @@ export default function Modals({
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillStyle = '#111118';
-    ctx.font = '800 15px "Syne", sans-serif';
-    ctx.fillText(currentProject, drawX + 16, drawY + 16);
+    ctx.font = `800 ${Math.round(15 * s)}px "Syne", sans-serif`;
+    ctx.fillText(currentProject, drawX + 16 * s, drawY + 16 * s);
 
     // Horizontal Scale indicator (Top-Right corner): Badge style
     const scaleString = currentScale || '1:100';
-    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+    ctx.font = `bold ${Math.round(11 * s)}px "JetBrains Mono", monospace`;
     const textW = ctx.measureText(scaleString).width;
-    const badgeW = textW + 16;
-    const badgeH = 22;
-    const badgeX = drawX + dw - badgeW - 16;
-    const badgeY = drawY + 14;
+    const badgeW = textW + 16 * s;
+    const badgeH = 22 * s;
+    const badgeX = drawX + dw - badgeW - 16 * s;
+    const badgeY = drawY + 14 * s;
 
     // Rounded rectangle background for scale badge
     ctx.fillStyle = '#ebf3ff';
     ctx.strokeStyle = '#4f8ef7';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.5 * s;
     
     ctx.beginPath();
     if (ctx.roundRect) {
-      ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+      ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4 * s);
     } else {
       ctx.rect(badgeX, badgeY, badgeW, badgeH);
     }
@@ -320,13 +380,22 @@ export default function Modals({
     ctx.fillStyle = '#0d111d';
     ctx.fillRect(0, footerY, width, footerHeight);
 
-    // Center Footer Text exactly: Arch Pad | v2.0 | CodeTech
+    // Center Footer Text exactly
     ctx.fillStyle = '#5a73a3';
-    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+    ctx.font = `bold ${Math.round(11 * s)}px "JetBrains Mono", monospace`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+
+    let paperLabel = 'CUSTOM';
+    const activeProj = projects[currentProject];
+    if (activeProj?.paperSize && activeProj?.paperSize !== 'custom') {
+      paperLabel = `${activeProj.paperSize.toUpperCase()}`;
+    }
+    const orientationLabel = activeProj?.orientation === 'portrait' ? 'PORTRAIT' : 'LANDSCAPE';
+    const footerLabel = `Arch Pad | ${paperLabel} (${orientationLabel}) | Scale ${scaleString} | Secure Plan File`;
+
     ctx.fillText(
-      'Arch Pad | v2.0 | CodeTech',
+      footerLabel,
       width / 2,
       footerY + footerHeight / 2
     );
@@ -831,7 +900,7 @@ export default function Modals({
             </div>
             <div className="info-row flex justify-between items-center py-2 border-b border-[var(--border)] text-[11px] mt-3 last:border-none">
               <span className="info-label text-[var(--text2)] font-mono text-[10px]">Data Sandbox</span>
-              <span className="info-val text-green-500 font-semibold">Strict Client-Only</span>
+              <span className="info-val text-green-500 font-semibold">Offline Secure Storage</span>
             </div>
             <div className="info-row flex justify-between items-center py-2 border-b border-[var(--border)] text-[11px] last:border-none">
               <span className="info-label text-[var(--text2)] font-mono text-[10px]">Cloud Transmission</span>
